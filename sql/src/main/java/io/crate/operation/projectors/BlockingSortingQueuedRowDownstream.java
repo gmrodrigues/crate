@@ -21,13 +21,10 @@
 
 package io.crate.operation.projectors;
 
-import com.google.common.collect.EvictingQueue;
 import com.google.common.collect.Ordering;
 import io.crate.core.collections.Row;
 import io.crate.core.collections.RowN;
 import io.crate.jobs.ExecutionState;
-import io.crate.operation.RowDownstream;
-import io.crate.operation.RowDownstreamHandle;
 import io.crate.operation.RowUpstream;
 import io.crate.operation.projectors.sorting.OrderingByPosition;
 import org.elasticsearch.common.Nullable;
@@ -38,16 +35,15 @@ import java.util.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 
-public class BlockingSortingQueuedRowDownstream implements Projector  {
+public class BlockingSortingQueuedRowDownstream implements RowMerger {
 
     private final Ordering<Object[]> ordering;
     private final List<BlockingSortingQueuedRowDownstreamHandle> downstreamHandles = new ArrayList<>();
     private final List<RowUpstream> upstreams = new ArrayList<>();
     private final AtomicInteger remainingUpstreams = new AtomicInteger(0);
     private final AtomicBoolean downstreamAborted = new AtomicBoolean(false);
-    private RowDownstreamHandle downstreamContext;
+    private final RowReceiver downstreamRowReceiver;
     private final SharedArrayRef lowestToEmit;
-    private final Object lowestToEmitLock = new Object();
     private final int rowSize;
     private final AtomicInteger runningHandles = new AtomicInteger(0);
 
@@ -64,7 +60,8 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
     public static int MAX_QUEUE_SIZE = 5;
     public static int RESUME_AFTER = 3;
 
-    public BlockingSortingQueuedRowDownstream(int rowSize,
+    public BlockingSortingQueuedRowDownstream(RowReceiver rowReceiver,
+                                              int rowSize,
                                               int[] orderBy,
                                               boolean[] reverseFlags,
                                               Boolean[] nullsFirst) {
@@ -75,18 +72,12 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
         }
         ordering = Ordering.compound(comparators);
         lowestToEmit = new SharedArrayRef(rowSize);
+        this.downstreamRowReceiver = rowReceiver;
+        rowReceiver.setUpstream(this);
     }
 
     @Override
-    public void startProjection(ExecutionState executionState) {
-        if (remainingUpstreams.get() == 0) {
-            upstreamFinished();
-        }
-    }
-
-    @Override
-    public RowDownstreamHandle registerUpstream(RowUpstream upstream) {
-        upstreams.add(upstream);
+    public RowReceiver newRowReceiver() {
         remainingUpstreams.incrementAndGet();
         runningHandles.incrementAndGet();
         BlockingSortingQueuedRowDownstreamHandle handle = new BlockingSortingQueuedRowDownstreamHandle(this, rowSize);
@@ -94,18 +85,11 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
         return handle;
     }
 
-    @Override
-    public void downstream(RowDownstream downstream) {
-        downstreamContext = downstream.registerUpstream(this);
-    }
-
     public void upstreamFinished() {
         runningHandles.decrementAndGet();
         emit();
         if (remainingUpstreams.decrementAndGet() <= 0) {
-            if (downstreamContext != null) {
-                downstreamContext.finish();
-            }
+            downstreamRowReceiver.finish();
         }
     }
 
@@ -113,9 +97,7 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
         runningHandles.decrementAndGet();
         downstreamAborted.compareAndSet(false, true);
         if (remainingUpstreams.decrementAndGet() == 0) {
-            if (downstreamContext != null) {
-                downstreamContext.fail(throwable);
-            }
+            downstreamRowReceiver.fail(throwable);
         }
     }
 
@@ -166,7 +148,7 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
         }
     }
 
-    public class BlockingSortingQueuedRowDownstreamHandle implements RowDownstreamHandle {
+    public class BlockingSortingQueuedRowDownstreamHandle implements RowReceiver {
 
         private final BlockingSortingQueuedRowDownstream projector;
         private final Object lock = new Object();
@@ -174,6 +156,7 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
         private AtomicBoolean finished = new AtomicBoolean(false);
         private Object[] firstCells = null;
         private final RowN row;
+
 
         private final ArrayDeque<Object[]> cellsQueue = new ArrayDeque<>(MAX_QUEUE_SIZE);
         private final ObjectPool<Object[]> pool = new ObjectPool<Object[]>(MAX_QUEUE_SIZE) {
@@ -210,7 +193,7 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
                 while (firstCells != null && ordering.compare(firstCells, until) >= 0) {
                     Object[] cells = poll();
                     row.cells(cells);
-                    boolean wantMore = downstreamContext.setNextRow(row);
+                    boolean wantMore = downstreamRowReceiver.setNextRow(row);
                     pool.checkin(cells);
                     if (!wantMore) {
                         res = false;
@@ -274,6 +257,16 @@ public class BlockingSortingQueuedRowDownstream implements Projector  {
         @Override
         public void fail(Throwable throwable) {
             projector.upstreamFailed(throwable);
+        }
+
+        @Override
+        public void prepare(ExecutionState executionState) {
+
+        }
+
+        @Override
+        public void setUpstream(RowUpstream rowUpstream) {
+            upstreams.add(rowUpstream);
         }
 
         private void pause() {

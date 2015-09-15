@@ -21,8 +21,8 @@
 
 package io.crate.testing;
 
-import com.google.common.base.Joiner;
-import com.google.common.base.Throwables;
+import com.google.common.base.*;
+import com.google.common.collect.Iterators;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import com.google.common.util.concurrent.Futures;
@@ -33,6 +33,7 @@ import io.crate.core.collections.*;
 import io.crate.metadata.*;
 import io.crate.planner.RowGranularity;
 import io.crate.planner.symbol.*;
+import io.crate.planner.symbol.Function;
 import io.crate.types.ArrayType;
 import io.crate.types.DataType;
 import io.crate.types.DataTypes;
@@ -54,6 +55,7 @@ import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadLocalRandom;
@@ -522,6 +524,17 @@ public class TestingHelpers {
             column[i] = rows[i][index];
         }
         return column;
+    }
+
+    public static Object[] getColumn(Bucket bucket, final int index) throws Exception {
+        return Iterators.toArray(Iterators.transform(bucket.iterator(), new com.google.common.base.Function<Row, Object>() {
+            @Nullable
+            @Override
+            public Object apply(@Nullable Row input) {
+                assert input != null : "input row is null :/";
+                return input.get(index);
+            }
+        }), Object.class);
     }
 
     public static WhereClause whereClause(String opname, Symbol left, Symbol right) {

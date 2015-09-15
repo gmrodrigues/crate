@@ -22,23 +22,29 @@
 package io.crate.operation.projectors;
 
 import com.carrotsearch.randomizedtesting.annotations.Repeat;
+import com.google.common.base.Function;
+import com.google.common.collect.Iterables;
+import com.google.common.collect.Iterators;
 import io.crate.core.collections.Bucket;
 import io.crate.core.collections.Row;
 import io.crate.core.collections.RowN;
 import io.crate.jobs.ExecutionState;
 import io.crate.operation.RowDownstream;
-import io.crate.operation.RowDownstreamHandle;
 import io.crate.operation.RowUpstream;
 import io.crate.test.integration.CrateUnitTest;
-import io.crate.testing.CollectingProjector;
+import io.crate.testing.CollectingRowReceiver;
 import io.crate.testing.TestingHelpers;
 import org.apache.commons.lang3.RandomUtils;
+import org.elasticsearch.common.collect.HppcMaps;
 import org.elasticsearch.test.junit.annotations.TestLogging;
+import org.hamcrest.Matchers;
 import org.junit.Test;
 
+import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.concurrent.TimeUnit;
 
+import static org.hamcrest.Matchers.arrayContaining;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.is;
 import static org.mockito.Mockito.mock;
@@ -55,13 +61,15 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
     private static class Upstream implements RowUpstream {
 
         private final ArrayList<Object[]> rows = new ArrayList<>();
-        private final RowDownstreamHandle downstreamHandle;
+        private final RowReceiver downstreamHandle;
 
         public Upstream(RowDownstream rowDownstream, Object[]... rows) {
             for (int i = 0; i < rows.length; i++) {
                 this.rows.add(rows[i]);
             }
-            downstreamHandle = rowDownstream.registerUpstream(this);
+
+            downstreamHandle = rowDownstream.newRowReceiver();
+            downstreamHandle.setUpstream(this);
         }
 
 
@@ -98,11 +106,12 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
     private static class SpareUpstream implements RowUpstream {
 
         private final int numRows;
-        private final RowDownstreamHandle downstreamHandle;
+        private final RowReceiver downstreamHandle;
 
         public SpareUpstream(RowDownstream rowDownstream, int numRows) {
             this.numRows = numRows;
-            downstreamHandle = rowDownstream.registerUpstream(this);
+            downstreamHandle = rowDownstream.newRowReceiver();
+            downstreamHandle.setUpstream(this);
         }
 
         private void doStart() {
@@ -147,7 +156,9 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
 
     @Test
     public void testSortMergeThreaded() throws Exception {
-        MergeProjector projector = new MergeProjector(
+        CollectingRowReceiver finalReceiver = new CollectingRowReceiver();
+        SortingRowMerger projector = new SortingRowMerger(
+                finalReceiver,
                 new int[]{0},
                 new boolean[]{false},
                 new Boolean[]{null}
@@ -159,10 +170,6 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
         Upstream upstream4 = new Upstream(projector, new Object[]{1}, new Object[]{3}, new Object[]{4});
         Upstream upstream5 = new Upstream(projector);
 
-        CollectingProjector collectingProjector = new CollectingProjector();
-
-        projector.downstream(collectingProjector);
-        projector.startProjection(mock(ExecutionState.class));
 
         upstream1.start();
         upstream2.start();
@@ -170,23 +177,11 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
         upstream4.start();
         upstream5.start();
 
-        Bucket result = collectingProjector.result().get(3, TimeUnit.SECONDS);
+        Bucket result = finalReceiver.result();
 
         assertThat(result.size(), is(13));
-        assertThat((Integer) collectingProjector.rows.get(0)[0], is(1));
-        assertThat((Integer) collectingProjector.rows.get(1)[0], is(1));
-        assertThat((Integer) collectingProjector.rows.get(2)[0], is(1));
-        assertThat((Integer) collectingProjector.rows.get(3)[0], is(2));
-        assertThat((Integer) collectingProjector.rows.get(4)[0], is(3));
-        assertThat((Integer) collectingProjector.rows.get(5)[0], is(3));
-        assertThat((Integer) collectingProjector.rows.get(6)[0], is(3));
-        assertThat((Integer) collectingProjector.rows.get(7)[0], is(3));
-        assertThat((Integer) collectingProjector.rows.get(8)[0], is(3));
-        assertThat((Integer) collectingProjector.rows.get(9)[0], is(4));
-        assertThat((Integer) collectingProjector.rows.get(10)[0], is(4));
-        assertThat((Integer) collectingProjector.rows.get(11)[0], is(4));
-        assertThat((Integer) collectingProjector.rows.get(12)[0], is(5));
-
+        Object[] column = TestingHelpers.getColumn(result, 0);
+        assertThat(column, Matchers.<Object>arrayContaining(1, 1, 1, 2, 3, 3, 3, 3, 3, 4, 4, 4, 5));
 
     }
 
@@ -194,7 +189,9 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
     @Repeat(iterations = 100)
     @TestLogging("io.crate.operation.projectors:TRACE")
     public void testBlockingSortingQueuedRowDownstreamThreaded() throws Exception {
+        CollectingRowReceiver receiver = new CollectingRowReceiver();
         BlockingSortingQueuedRowDownstream projector = new BlockingSortingQueuedRowDownstream(
+                receiver,
                 1,
                 new int[]{0},
                 new boolean[]{false},
@@ -207,10 +204,6 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
         SpareUpstream upstream4 = new SpareUpstream(projector, 13);
         SpareUpstream upstream5 = new SpareUpstream(projector, 0);
 
-        CollectingProjector collectingProjector = new CollectingProjector();
-
-        projector.downstream(collectingProjector);
-        projector.startProjection(mock(ExecutionState.class));
 
         upstream1.start();
         upstream2.start();
@@ -218,8 +211,7 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
         upstream4.start();
         upstream5.start();
 
-        Bucket result = collectingProjector.result().get(3, TimeUnit.SECONDS);
-
+        Bucket result = receiver.result();
         assertThat(result.size(), is(80));
         assertThat(result, TestingHelpers.isSorted(0));
     }
