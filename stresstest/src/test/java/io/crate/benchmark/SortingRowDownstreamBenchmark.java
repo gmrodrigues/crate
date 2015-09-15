@@ -30,12 +30,9 @@ import io.crate.core.collections.Row;
 import io.crate.core.collections.RowN;
 import io.crate.jobs.ExecutionState;
 import io.crate.operation.RowDownstream;
-import io.crate.operation.RowDownstreamHandle;
 import io.crate.operation.RowUpstream;
-import io.crate.operation.projectors.BlockingSortingQueuedRowDownstream;
-import io.crate.operation.projectors.MergeProjector;
-import io.crate.operation.projectors.Projector;
-import io.crate.testing.CollectingProjector;
+import io.crate.operation.projectors.*;
+import io.crate.testing.CollectingRowReceiver;
 import org.junit.AfterClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -44,7 +41,6 @@ import org.junit.rules.TestRule;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutionException;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
 import static org.mockito.Mockito.mock;
@@ -64,7 +60,7 @@ public class SortingRowDownstreamBenchmark extends BenchmarkBase {
 
     private static class Upstream implements RowUpstream {
 
-        private final RowDownstreamHandle downstreamHandle;
+        private final RowReceiver downstreamHandle;
 
         private final Object[] cells = new Object[1];
         private final Row row = new RowN(cells);
@@ -72,7 +68,8 @@ public class SortingRowDownstreamBenchmark extends BenchmarkBase {
 
         public Upstream(RowDownstream rowDownstream, int offset) {
             this.offset = offset;
-            downstreamHandle = rowDownstream.registerUpstream(this);
+            downstreamHandle = rowDownstream.newRowReceiver();
+            downstreamHandle.setUpstream(this);
         }
 
         @Override
@@ -86,6 +83,7 @@ public class SortingRowDownstreamBenchmark extends BenchmarkBase {
         }
 
         private void doStart() {
+            downstreamHandle.prepare(mock(ExecutionState.class));
             int limit = offset + NUMBER_OF_DOCUMENTS / ( NUM_UPSTREAMS * SAME_VALUES);
             for (int i = offset; i < limit; i++) {
                 cells[0] = i;
@@ -108,7 +106,7 @@ public class SortingRowDownstreamBenchmark extends BenchmarkBase {
 
     }
 
-    private class NonMaterializingCollectingProjector extends CollectingProjector {
+    private class NonMaterializingCollectingRowReceiver extends CollectingRowReceiver {
 
         @Override
         public boolean setNextRow(Row row) {
@@ -139,43 +137,45 @@ public class SortingRowDownstreamBenchmark extends BenchmarkBase {
         return true; // prevent index creation
     }
 
-    private void runPerformanceTest(Projector toTest) throws InterruptedException, ExecutionException, TimeoutException {
-        CollectingProjector downstream = new NonMaterializingCollectingProjector();
-        toTest.downstream(downstream);
+    private void runPerformanceTest(RowMerger toTest) throws InterruptedException, ExecutionException, TimeoutException {
 
         Upstream[] upstreams = new Upstream[NUM_UPSTREAMS];
 
         for (int i = 0; i < NUM_UPSTREAMS; i++) {
             upstreams[i] = new Upstream(toTest, i % 2 == 0 ? OFFSET : 0);
         }
-        toTest.startProjection(mock(ExecutionState.class));
         for (int i = 0; i < NUM_UPSTREAMS; i++) {
             upstreams[i].start();
         }
-        downstream.result().get(1, TimeUnit.MINUTES);
     }
 
     @BenchmarkOptions(benchmarkRounds = BENCHMARK_ROUNDS, warmupRounds = WARMUP_ROUNDS)
     @Test
     public void testMergeProjectorPerformance() throws Exception {
-        MergeProjector projector = new MergeProjector(
+        CollectingRowReceiver downstream = new NonMaterializingCollectingRowReceiver();
+        SortingRowMerger rowMerger = new SortingRowMerger(
+                downstream,
                 new int[]{0},
                 new boolean[]{false},
                 new Boolean[]{null}
         );
-        runPerformanceTest(projector);
+        runPerformanceTest(rowMerger);
+        downstream.result();
     }
 
     @BenchmarkOptions(benchmarkRounds = BENCHMARK_ROUNDS, warmupRounds = WARMUP_ROUNDS)
     @Test
     public void testBlockingSortingQueuedRowDownstreamBenchmark() throws Exception {
-        BlockingSortingQueuedRowDownstream projector = new BlockingSortingQueuedRowDownstream(
+        CollectingRowReceiver downstream = new NonMaterializingCollectingRowReceiver();
+        BlockingSortingQueuedRowDownstream rowMerger = new BlockingSortingQueuedRowDownstream(
+                downstream,
                 1,
                 new int[]{0},
                 new boolean[]{false},
                 new Boolean[]{null}
         );
-        runPerformanceTest(projector);
+        runPerformanceTest(rowMerger);
+        downstream.result();
     }
 
 }
