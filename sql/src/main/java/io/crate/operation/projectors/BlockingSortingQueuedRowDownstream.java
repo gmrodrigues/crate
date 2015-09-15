@@ -57,8 +57,8 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
      * So the handle is blocked when queue has reached MAX_QUEUE_SIZE
      * And unblock the handle if the queue has 0 rows
      */
-    public static int MAX_QUEUE_SIZE = 5;
-    public static int RESUME_AFTER = 3;
+    public static int MAX_QUEUE_SIZE = 1000;
+    public static int RESUME_AFTER = 10;
 
     public BlockingSortingQueuedRowDownstream(RowReceiver rowReceiver,
                                               int rowSize,
