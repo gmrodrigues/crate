@@ -21,6 +21,7 @@
 
 package io.crate.operation.projectors;
 
+import com.google.common.collect.Lists;
 import com.google.common.collect.Ordering;
 import io.crate.core.collections.Row;
 import io.crate.core.collections.RowN;
@@ -45,6 +46,7 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
     private final RowReceiver downstreamRowReceiver;
     private final SharedArrayRef lowestToEmit;
     private final int rowSize;
+    private final int hashCode = hashCode();
     private final AtomicInteger runningHandles = new AtomicInteger(0);
 
 
@@ -57,8 +59,8 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
      * So the handle is blocked when queue has reached MAX_QUEUE_SIZE
      * And unblock the handle if the queue has 0 rows
      */
-    public static int MAX_QUEUE_SIZE = 1000;
-    public static int RESUME_AFTER = 10;
+    public static int MAX_QUEUE_SIZE = 5;
+    public static int RESUME_AFTER = 3;
 
     public BlockingSortingQueuedRowDownstream(RowReceiver rowReceiver,
                                               int rowSize,
@@ -78,7 +80,8 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
 
     @Override
     public RowReceiver newRowReceiver() {
-        remainingUpstreams.incrementAndGet();
+        int upstreams = remainingUpstreams.incrementAndGet();
+        LOGGER.trace("[{}] new RowReceiver #{}", hashCode, upstreams);
         runningHandles.incrementAndGet();
         BlockingSortingQueuedRowDownstreamHandle handle = new BlockingSortingQueuedRowDownstreamHandle(this, rowSize);
         downstreamHandles.add(handle);
@@ -86,9 +89,13 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
     }
 
     public void upstreamFinished() {
-        runningHandles.decrementAndGet();
+        int stillRunning = runningHandles.decrementAndGet();
+        int remaining = remainingUpstreams.decrementAndGet();
+
         emit();
-        if (remainingUpstreams.decrementAndGet() <= 0) {
+        LOGGER.trace("[{}] UPSTREAM FINISHED. {} upstreams remaining, {} handles running", hashCode, remaining, stillRunning);
+        if (remaining == 0) {
+            LOGGER.trace("[{}] FINISHING DOWNSTREAM", hashCode);
             downstreamRowReceiver.finish();
         }
     }
@@ -96,7 +103,9 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
     public void upstreamFailed(Throwable throwable) {
         runningHandles.decrementAndGet();
         downstreamAborted.compareAndSet(false, true);
-        if (remainingUpstreams.decrementAndGet() == 0) {
+        int remaining = remainingUpstreams.decrementAndGet();
+        LOGGER.trace("[{}] UPSTREAM FAILED. {} upstreams remaining", throwable, hashCode, remaining);
+        if (remaining == 0) {
             downstreamRowReceiver.fail(throwable);
         }
     }
@@ -115,7 +124,6 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
                 if (cells == null) {
                     if (!handle.isFinished()) {
                         emptyHandle = true;
-                        break;
                     }
                     continue;
                 }
@@ -157,6 +165,9 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
         private Object[] firstCells = null;
         private final RowN row;
 
+        private int pauseCount = 0;
+        private final int hashCode;
+
 
         private final ArrayDeque<Object[]> cellsQueue = new ArrayDeque<>(MAX_QUEUE_SIZE);
         private final ObjectPool<Object[]> pool = new ObjectPool<Object[]>(MAX_QUEUE_SIZE) {
@@ -172,6 +183,7 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
         public BlockingSortingQueuedRowDownstreamHandle(BlockingSortingQueuedRowDownstream projector, int rowSize) {
             this.projector = projector;
             this.row = new RowN(rowSize);
+            this.hashCode = hashCode();
         }
 
         @Nullable
@@ -201,7 +213,8 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
                     }
                 }
                 int size = cellsQueue.size();
-                if (paused && (size <= RESUME_AFTER || (size < MAX_QUEUE_SIZE && runningHandles.get() == 1))) {
+                int running = runningHandles.get();
+                if (paused && (size <= RESUME_AFTER || (size < MAX_QUEUE_SIZE && running <= 1))) {
                     resume();
                 }
             }
@@ -247,6 +260,7 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
         public void finish() {
             if (finished.compareAndSet(false, true)) {
                 projector.upstreamFinished();
+                LOGGER.trace("[{}][{}] paused {} times", projector.hashCode, hashCode, pauseCount);
             }
         }
 
@@ -272,6 +286,7 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger {
         private void pause() {
             synchronized (pauseLock) {
                 if (pendingPause.compareAndSet(true, false)) {
+                    pauseCount++;
                     try {
                         pauseLock.wait();
                     } catch (InterruptedException e) {

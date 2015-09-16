@@ -187,6 +187,7 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
 
         if (!wantMore || (limit != null && rowCount >= limit)) {
             // no more rows required, we can stop here
+            LOGGER.trace("WANTMORE: {}, ROWCOUNT: {}", wantMore, rowCount);
             throw CollectionFinishedEarlyException.INSTANCE;
         }
     }
@@ -275,13 +276,17 @@ public class LuceneDocCollector extends Collector implements CrateCollector, Row
             if (searchAndCollect()) {
                 finished = true;
                 downstream.finish();
-            } /// else = pause
+            } else {
+                LOGGER.trace("[{}] COLLECTOR DONE DURING PAUSE", downstream);
+            }
         } catch (CollectionFinishedEarlyException e) {
+            LOGGER.trace("COLLECTION FINISHED EARLY");
             paused.set(false);
             finished = true;
             downstream.finish();
         } catch (CollectionPauseException e) {
             // paused - do nothing
+            LOGGER.trace("PAUSE Collector", e);
         } catch (Throwable e) {
             paused.set(false);
             searchContext.close();

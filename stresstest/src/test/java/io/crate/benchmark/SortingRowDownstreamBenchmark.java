@@ -33,6 +33,7 @@ import io.crate.operation.RowDownstream;
 import io.crate.operation.RowUpstream;
 import io.crate.operation.projectors.*;
 import io.crate.testing.CollectingRowReceiver;
+import org.elasticsearch.test.junit.annotations.TestLogging;
 import org.junit.AfterClass;
 import org.junit.Rule;
 import org.junit.Test;
@@ -49,7 +50,7 @@ import static org.mockito.Mockito.mock;
 @BenchmarkMethodChart(filePrefix = "benchmark-sortingrowdownstream")
 public class SortingRowDownstreamBenchmark extends BenchmarkBase {
 
-    public static final int NUMBER_OF_DOCUMENTS = 1_000_000;
+    public static final int NUMBER_OF_DOCUMENTS = 10_000_000;
     public static final int BENCHMARK_ROUNDS = 10;
     public static final int WARMUP_ROUNDS = 10;
     public static final int NUM_UPSTREAMS = 5;
@@ -163,6 +164,7 @@ public class SortingRowDownstreamBenchmark extends BenchmarkBase {
         downstream.result();
     }
 
+    @TestLogging("io.crate.operation.projectors.BlockingSortingQueuedRowDownstream:TRACE")
     @BenchmarkOptions(benchmarkRounds = BENCHMARK_ROUNDS, warmupRounds = WARMUP_ROUNDS)
     @Test
     public void testBlockingSortingQueuedRowDownstreamBenchmark() throws Exception {

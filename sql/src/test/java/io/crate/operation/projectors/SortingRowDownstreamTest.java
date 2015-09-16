@@ -120,6 +120,7 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
             int i = 0;
             Object[] cells = new Object[1];
             Row rowN = new RowN(cells);
+            downstreamHandle.prepare(mock(ExecutionState.class));
             while (i < numRows) {
                 for (int j = 0; j < sameValues; j++) {
                     cells[0] = currentValue;
@@ -186,8 +187,8 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
     }
 
     @Test
-    @Repeat(iterations = 100)
-    @TestLogging("io.crate.operation.projectors:TRACE")
+    @Repeat(iterations = 10)
+    @TestLogging("io.crate.operation.projectors.BlockingSortingQueuedRowDownstream:TRACE")
     public void testBlockingSortingQueuedRowDownstreamThreaded() throws Exception {
         CollectingRowReceiver receiver = new CollectingRowReceiver();
         BlockingSortingQueuedRowDownstream projector = new BlockingSortingQueuedRowDownstream(
@@ -203,7 +204,6 @@ public class SortingRowDownstreamTest extends CrateUnitTest {
         SpareUpstream upstream3 = new SpareUpstream(projector, 7);
         SpareUpstream upstream4 = new SpareUpstream(projector, 13);
         SpareUpstream upstream5 = new SpareUpstream(projector, 0);
-
 
         upstream1.start();
         upstream2.start();
