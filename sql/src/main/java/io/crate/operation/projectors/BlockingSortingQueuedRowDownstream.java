@@ -229,7 +229,6 @@ public class BlockingSortingQueuedRowDownstream implements RowMerger  {
             synchronized (lock) {
                 while (firstCells != null && ordering.compare(firstCells, until) >= 0) {
                     if (!downstreamContext.setNextRow(poll())) {
-                        resume();
                         res = false;
                         break;
                     }

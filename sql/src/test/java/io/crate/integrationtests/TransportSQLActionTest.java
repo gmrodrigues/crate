@@ -2034,7 +2034,7 @@ public class TransportSQLActionTest extends SQLTransportIntegrationTest {
                 "   \"warmer.enabled\" = true\n" +
                 ")");
         ensureYellow();
-        for (int i = 0; i < 80; i++) {
+        for (int i = 0; i < 1000; i++) {
             Object[][] args = new Object[1000][];
             for (int j = 0; j < 1000; j++) {
                 args[j] = new Object[]{randomInt(1000), randomInt(10), randomUnicodeOfLength(10)};
