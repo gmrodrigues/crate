@@ -2034,7 +2034,7 @@ public class TransportSQLActionTest extends SQLTransportIntegrationTest {
                 "   \"warmer.enabled\" = true\n" +
                 ")");
         ensureYellow();
-        for (int i = 0; i < 1000; i++) {
+        for (int i = 0; i < 80; i++) {
             Object[][] args = new Object[1000][];
             for (int j = 0; j < 1000; j++) {
                 args[j] = new Object[]{randomInt(1000), randomInt(10), randomUnicodeOfLength(10)};
@@ -2042,7 +2042,7 @@ public class TransportSQLActionTest extends SQLTransportIntegrationTest {
             execute("insert into rankings_cj (\"avgDuration\", \"pageRank\", \"pageURL\") values (?,?,?)", args);
         }
         execute("refresh table rankings_cj", TimeValue.timeValueSeconds(20));
-        execute("SELECT * FROM rankings_cj ORDER BY \"pageURL\" LIMIT 1 OFFSET 50000", TimeValue.timeValueSeconds(60));
+        execute("SELECT * FROM rankings_cj ORDER BY \"pageURL\" LIMIT 1 OFFSET 50000", TimeValue.timeValueSeconds(120));
     }
 }
 
