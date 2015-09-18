@@ -1,7 +1,7 @@
 package io.crate.metadata.shard.unassigned;
 
-import io.crate.metadata.PartitionName;
 import io.crate.blob.v2.BlobIndices;
+import io.crate.metadata.PartitionName;
 import io.crate.metadata.Schemas;
 import io.crate.metadata.blob.BlobSchemaInfo;
 import org.apache.lucene.util.BytesRef;
@@ -12,6 +12,24 @@ import org.elasticsearch.index.shard.ShardId;
 import java.util.regex.Matcher;
 
 public class UnassignedShard {
+
+    public static boolean isUnassigned(int shardId) {
+        return shardId < 0;
+    }
+
+    public static int markUnassigned(int id) {
+        if (id >= 0) {
+            return (id + 1) * -1;
+        }
+        return id;
+    }
+
+    public static int markAssigned(int shard) {
+        if (shard < 0) {
+            return (shard * -1) - 1;
+        }
+        return shard;
+    }
 
     private final String schemaName;
     private final String tableName;
