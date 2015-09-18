@@ -15,7 +15,6 @@ public class Routing implements Streamable {
 
     private Map<String, Map<String, List<Integer>>> locations;
     private volatile int numShards = -1;
-    private int jobSearchContextIdBase = -1;
 
     public static abstract class RoutingLocationVisitor {
 
@@ -212,14 +211,6 @@ public class Routing implements Streamable {
         return false;
     }
 
-    public void jobSearchContextIdBase(int jobSearchContextIdBase) {
-        this.jobSearchContextIdBase = jobSearchContextIdBase;
-    }
-
-    public int jobSearchContextIdBase() {
-        return jobSearchContextIdBase;
-    }
-
     /**
      * check whether this routing only contains special routing entries for
      * {@link TableInfo#NULL_NODE_ID}.
@@ -238,7 +229,6 @@ public class Routing implements Streamable {
         if (hasLocations()) {
             helper.add("locations", locations);
         }
-        helper.add("jobSearchContextIdBase", jobSearchContextIdBase);
         return helper.toString();
 
     }
@@ -268,9 +258,6 @@ public class Routing implements Streamable {
                     innerMap.put(key, shardIds);
                 }
             }
-        }
-        if (in.readBoolean()) {
-            jobSearchContextIdBase = in.readVInt();
         }
     }
 
@@ -304,12 +291,6 @@ public class Routing implements Streamable {
         } else {
             out.writeVInt(0);
         }
-        if (jobSearchContextIdBase > -1) {
-            out.writeBoolean(true);
-            out.writeVInt(jobSearchContextIdBase);
-        } else {
-            out.writeBoolean(false);
-        }
     }
 
     private boolean assertLocationsAllTreeMap(@Nullable Map<String, Map<String, List<Integer>>> locations) {
@@ -332,12 +313,11 @@ public class Routing implements Streamable {
         if (o == null || getClass() != o.getClass()) return false;
         Routing routing = (Routing) o;
         return Objects.equals(numShards, routing.numShards) &&
-                Objects.equals(jobSearchContextIdBase, routing.jobSearchContextIdBase) &&
                 Objects.equals(locations, routing.locations);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(locations, numShards, jobSearchContextIdBase);
+        return Objects.hash(locations, numShards);
     }
 }

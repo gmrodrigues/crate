@@ -24,7 +24,6 @@ import io.crate.operation.aggregation.impl.AggregationImplModule;
 import io.crate.operation.operator.OperatorModule;
 import io.crate.operation.predicate.PredicateModule;
 import io.crate.operation.scalar.ScalarFunctionModule;
-import io.crate.planner.distribution.DistributionType;
 import io.crate.planner.node.PlanNode;
 import io.crate.planner.node.ddl.DropTableNode;
 import io.crate.planner.node.ddl.ESClusterUpdateSettingsNode;
@@ -1824,48 +1823,28 @@ public class PlannerTest extends CrateUnitTest {
         assertThat(indices, arrayContainingInAnyOrder("custom..partitioned.table.04130", "custom..partitioned.table.04332chj6gqg"));
     }
 
-//    @Test
-//    public void testAllocatedJobSearchContextIds() throws Exception {
-//        Planner.Context plannerContext = new Planner.Context(clusterService, UUID.randomUUID(), null);
-//        CollectPhase collectNode = new CollectPhase(
-//                plannerContext.jobId(),
-//                plannerContext.nextExecutionPhaseId(),
-//                "collect",
-//                shardRouting,
-//                RowGranularity.DOC,
-//                ImmutableList.<Symbol>of(),
-//                ImmutableList.<Projection>of(),
-//                WhereClause.MATCH_ALL,
-//                DistributionType.BROADCAST
-//        );
-//        int shardNum = collectNode.routing().numShards();
-//
-//        plannerContext.allocateRouting(collectNode.routing());
-//
-//        java.lang.reflect.Field f = plannerContext.getClass().getDeclaredField("jobSearchContextIdBaseSeq");
-//        f.setAccessible(true);
-//        int jobSearchContextIdBaseSeq = (Integer)f.get(plannerContext);
-//
-//        assertThat(jobSearchContextIdBaseSeq, is(shardNum));
-//        assertThat(collectNode.routing().jobSearchContextIdBase(), is(jobSearchContextIdBaseSeq-shardNum));
-//
-//        int idx = 0;
-//        for (Map.Entry<String, Map<String, List<Integer>>> locations : collectNode.routing().locations().entrySet()) {
-//            String nodeId = locations.getKey();
-//            for (Map.Entry<String, List<Integer>> entry : locations.getValue().entrySet()) {
-//                for (Integer shardId : entry.getValue()) {
-//                    assertThat(plannerContext.shardId(idx), is(new ShardId(entry.getKey(), shardId)));
-//                    assertThat(plannerContext.nodeId(idx), is(nodeId));
-//                    idx++;
-//                }
-//            }
-//        }
-//
-//        // jobSearchContextIdBase must only set once on a Routing instance
-//        int jobSearchContextIdBase = collectNode.routing().jobSearchContextIdBase();
-//        plannerContext.allocateRouting(collectNode.routing());
-//        assertThat(collectNode.routing().jobSearchContextIdBase(), is(jobSearchContextIdBase));
-//    }
+    @Test
+    public void testBuildReaderAllocations() throws Exception {
+        TableIdent custom = new TableIdent("custom", "t1");
+        TableInfo tableInfo = TestingTableInfo.builder(custom, shardRouting).add("id", DataTypes.INTEGER, null).build();
+        Planner.Context plannerContext = new Planner.Context(clusterService, UUID.randomUUID(), null);
+        plannerContext.allocateRouting(tableInfo, WhereClause.MATCH_ALL, null);
+
+        Planner.Context.ReaderAllocations readerAllocations = plannerContext.buildReaderAllocations();
+
+        assertThat(readerAllocations.indices().size(), is(1));
+        assertThat(readerAllocations.indices().get(0), is("t1"));
+        assertThat(readerAllocations.nodes().size(), is(4));
+        assertThat(readerAllocations.nodes().get(1), is("nodeOne"));
+        assertThat(readerAllocations.nodes().get(2), is("nodeOne"));
+        assertThat(readerAllocations.nodes().get(3), is("nodeTow"));
+        assertThat(readerAllocations.nodes().get(4), is("nodeTow"));
+        assertThat(readerAllocations.bases().get("t1"), is(0));
+
+        // allocations must stay same on multiple calls
+        Planner.Context.ReaderAllocations readerAllocations2 = plannerContext.buildReaderAllocations();
+        assertThat(readerAllocations, is(readerAllocations2));
+    }
 
     @Test
     public void testExecutionPhaseIdSequence() throws Exception {
