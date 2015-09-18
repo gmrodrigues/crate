@@ -262,6 +262,8 @@ public class ShardCollectSource implements CollectSource {
             }
         }
         if (!unassignedShards.isEmpty()) {
+            // since unassigned shards aren't really on any node we use the collectPhase which is NOT normalized here
+            // because otherwise if _node was also selected it would contain something which is wrong
             shardCollectors.addAll(unassignedShardsCollectSource.getCollectors(
                     collectPhase, unassignedShards, projectorChain.newShardDownstreamProjector(projectorFactory)));
         }

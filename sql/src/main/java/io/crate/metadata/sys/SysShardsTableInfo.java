@@ -159,6 +159,12 @@ public class SysShardsTableInfo extends SysTableInfo {
     }
 
 
+    /**
+     * Retrieves the routing for sys.shards
+     *
+     * This routing contains ALL shards of ALL indices.
+     * Any shards that are not yet assigned to a node will have a NEGATIVE shard id (see {@link UnassignedShard}
+     */
     @Override
     public Routing getRouting(WhereClause whereClause, @Nullable String preference) {
         // TODO: filter on whereClause
